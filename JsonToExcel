@@ -1,0 +1,244 @@
+import copy
+import json
+import openpyxl
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+# CẤU HÌNH ĐƯỜNG DẪN FILE (Sửa lại tên file nếu cần)
+JSON_PATH = r'E:\DownloadHolder\DoAn\update_nxs_data.json'
+EXCEL_INPUT_PATH = (
+    r'E:\DownloadHolder\DoAn\HUSC-24_BlackBoxTestCase_NHASANXUAT.xlsx'
+)
+EXCEL_OUTPUT_PATH = r'E:\DownloadHolder\DoAn\Updated_TestCases_NSX.xlsx'
+
+
+def run_update():
+  print('--- BẮT ĐẦU CẬP NHẬT EXCEL TEST CASE KHÁCH HÀNG ---')
+
+  with open(JSON_PATH, 'r', encoding='utf-8') as f:
+    patch_data = json.load(f)
+
+  wb = openpyxl.load_workbook(EXCEL_INPUT_PATH)
+
+  # 1. CẬP NHẬT CÁC TEST CASE ĐÃ CÓ (FIX DB, URL, PROCEDURE COPY-PASTE)
+  updates = patch_data.get('Test Case Updates', {})
+  updated_count = 0
+
+  for sheetname in wb.sheetnames:
+    ws = wb[sheetname]
+    id_col = None
+    desc_col = None
+    proc_col = None
+    exp_col = None
+    note_col = None
+
+    for r in range(1, 15):
+      for c in range(1, 12):
+        val = str(ws.cell(row=r, column=c).value or '').strip()
+        if val == 'ID':
+          id_col = c
+          header_row = r
+          for c2 in range(1, 12):
+            h_val = str(ws.cell(row=header_row, column=c2).value or '').strip()
+            if 'Description' in h_val:
+              desc_col = c2
+            elif 'Procedure' in h_val:
+              proc_col = c2
+            elif 'Expected' in h_val:
+              exp_col = c2
+            elif 'Note' in h_val:
+              note_col = c2
+          break
+      if id_col:
+        break
+
+    if not id_col:
+      continue
+
+    for r in range(header_row + 1, ws.max_row + 1):
+      tc_id = str(ws.cell(row=r, column=id_col).value or '').strip()
+      if tc_id in updates:
+        patch = updates[tc_id]
+        if 'Expected Output' in patch and exp_col:
+          ws.cell(row=r, column=exp_col, value=patch['Expected Output'])
+        if 'Test Case Procedure' in patch and proc_col:
+          ws.cell(row=r, column=proc_col, value=patch['Test Case Procedure'])
+        if 'Test Case Description' in patch and desc_col:
+          ws.cell(
+              row=r, column=desc_col, value=patch['Test Case Description']
+          )
+        if 'Note' in patch and note_col:
+          ws.cell(row=r, column=note_col, value=patch['Note'])
+        updated_count += 1
+        print(f" -> Đã cập nhật thành công: [{tc_id}] trong sheet '{sheetname}'")
+
+  print(f'==> Tổng cộng đã sửa đổi nội dung: {updated_count} test cases.')
+
+  # 2. CHÈN CÁC TEST CASE MỚI (BRUTE-FORCE, DEBOUNCE, BIÊN RATING)
+  new_cases = patch_data.get('New Test Cases', [])
+  for new_case in new_cases:
+    sheetname = new_case['sheet']
+    after_id = new_case['after_id']
+    data = new_case['data']
+
+    if sheetname not in wb.sheetnames:
+      continue
+
+    ws = wb[sheetname]
+    target_row = None
+    id_col = None
+
+    for r in range(1, ws.max_row + 1):
+      for c in range(1, 10):
+        if str(ws.cell(row=r, column=c).value or '').strip() == after_id:
+          target_row = r
+          id_col = c
+          break
+      if target_row:
+        break
+
+    if target_row and id_col:
+      insert_at = target_row + 1
+      ws.insert_rows(insert_at)
+
+      for col_idx in range(1, 9):
+        source_cell = ws.cell(row=target_row, column=col_idx)
+        new_cell = ws.cell(row=insert_at, column=col_idx)
+        if source_cell.has_style:
+          new_cell.font = copy.copy(source_cell.font)
+          new_cell.border = copy.copy(source_cell.border)
+          new_cell.fill = copy.copy(source_cell.fill)
+          new_cell.number_format = copy.copy(source_cell.number_format)
+          new_cell.protection = copy.copy(source_cell.protection)
+          new_cell.alignment = copy.copy(source_cell.alignment)
+
+      ws.cell(row=insert_at, column=id_col, value=data['ID'])
+      ws.cell(row=insert_at, column=id_col + 1, value=data['Test Case Description'])
+      ws.cell(row=insert_at, column=id_col + 2, value=data['Test Case Procedure'])
+      ws.cell(row=insert_at, column=id_col + 3, value=data['Expected Output'])
+      ws.cell(
+          row=insert_at,
+          column=id_col + 4,
+          value=data['Inter-test case Dependence'],
+      )
+      ws.cell(row=insert_at, column=id_col + 5, value=data['Result'])
+      ws.cell(row=insert_at, column=id_col + 6, value=data['Test date'])
+      ws.cell(row=insert_at, column=id_col + 7, value=data['Note'])
+
+      print(
+          f" -> Đã chèn test case mới: [{data['ID']}] ngay sau [{after_id}]"
+          f" trong sheet '{sheetname}'"
+      )
+
+  # 3. ĐIỀN DỮ LIỆU ĐẦY ĐỦ VÀO SHEET 'Layout Customer'
+  layout_sheet_name = (
+      'Layout Customer'
+      if 'Layout Customer' in wb.sheetnames
+      else ('Layout Admin' if 'Layout Admin' in wb.sheetnames else None)
+  )
+
+  if layout_sheet_name:
+    ws_layout = wb[layout_sheet_name]
+    ws_layout.delete_rows(1, ws_layout.max_row + 10)
+
+    thin_border = Border(
+        left=Side(style='thin', color='CCCCCC'),
+        right=Side(style='thin', color='CCCCCC'),
+        top=Side(style='thin', color='CCCCCC'),
+        bottom=Side(style='thin', color='CCCCCC'),
+    )
+    header_font = Font(name='Arial', size=11, bold=True, color='FFFFFF')
+    header_fill = PatternFill(
+        start_color='1F4E79', end_color='1F4E79', fill_type='solid'
+    )
+    title_font = Font(name='Arial', size=13, bold=True, color='1F4E79')
+
+    ws_layout.cell(
+        row=2,
+        column=2,
+        value='SƠ ĐỒ BỐ CỤC GIAO DIỆN KHÁCH HÀNG (SCREENS 06 - 11)',
+    ).font = title_font
+
+    headers = [
+      'STT',
+      'Màn hình / Screen',
+      'Vị trí SRS',
+      'Module liên quan',
+      'Mô tả bố cục & Thành phần giao diện (UI Layout)',
+    ]
+    for c_idx, h_text in enumerate(headers, start=2):
+      c = ws_layout.cell(row=4, column=c_idx, value=h_text)
+      c.font = header_font
+      c.fill = header_fill
+      c.alignment = Alignment(
+          horizontal='center', vertical='center', wrap_text=True
+      )
+      c.border = thin_border
+
+    layout_items = patch_data.get('Layout Customer', [])[1:]
+    for idx, item in enumerate(layout_items, start=1):
+      r = 4 + idx
+      row_vals = [idx, item['col1'], item['col2'], item['col3'], item['col4']]
+      for c_idx, val in enumerate(row_vals, start=2):
+        cell = ws_layout.cell(row=r, column=c_idx, value=val)
+        cell.font = Font(name='Arial', size=10)
+        cell.border = thin_border
+        if c_idx in [2, 3, 4]:
+          cell.alignment = Alignment(horizontal='center', vertical='center')
+        else:
+          cell.alignment = Alignment(
+              horizontal='left', vertical='center', wrap_text=True
+          )
+
+    ws_layout.column_dimensions['B'].width = 8
+    ws_layout.column_dimensions['C'].width = 30
+    ws_layout.column_dimensions['D'].width = 15
+    ws_layout.column_dimensions['E'].width = 28
+    ws_layout.column_dimensions['F'].width = 80
+    print(
+        f" -> Đã tạo cấu trúc layout hoàn chỉnh cho sheet '{layout_sheet_name}'."
+    )
+
+  # 4. ĐỒNG BỘ LẠI TỔNG SỐ LƯỢNG TEST CASE TRONG SHEET 'Test Report'
+  if 'Test Report' in wb.sheetnames:
+    ws_report = wb['Test Report']
+    summary_map = patch_data.get('Test Report Summary', {})
+
+    for r in range(1, ws_report.max_row + 1):
+      for c in range(1, ws_report.max_column + 1):
+        cell_val = str(ws_report.cell(row=r, column=c).value or '').strip()
+        if cell_val in summary_map:
+          target_count = summary_map[cell_val]
+          for c2 in range(c + 1, ws_report.max_column + 1):
+            v = ws_report.cell(row=r, column=c2).value
+            if isinstance(v, (int, float)) and v > 0:
+              ws_report.cell(row=r, column=c2, value=target_count)
+        elif cell_val.lower() == 'sub total':
+          for c2 in range(c + 1, ws_report.max_column + 1):
+            v = ws_report.cell(row=r, column=c2).value
+            if isinstance(v, (int, float)) and v > 100:
+              ws_report.cell(row=r, column=c2, value=summary_map['Total'])
+    print(
+        " -> Đã cập nhật tổng số lượng test case mới (180 cases) vào sheet"
+        " 'Test Report'."
+    )
+
+  # 5. CẬP NHẬT HEADER SỐ LƯỢNG TEST CASE Ở ĐẦU TỪNG SHEET MODULE
+  for sheetname, count in summary_map.items():
+    if sheetname != 'Total' and sheetname in wb.sheetnames:
+      ws = wb[sheetname]
+      for r in range(1, 8):
+        for c in range(1, 8):
+          v = ws.cell(row=r, column=c).value
+          if str(v or '').strip() == 'Number of Test cases':
+            # Ô chứa giá trị nằm ngay bên dưới
+            ws.cell(row=r + 1, column=c, value=count)
+            # Cột Untested nằm ở cột c - 2
+            if c >= 3:
+              ws.cell(row=r + 1, column=c - 2, value=count)
+
+  wb.save(EXCEL_OUTPUT_PATH)
+  print(f'=== HOÀN TẤT! File kết quả đã lưu tại: {EXCEL_OUTPUT_PATH} ===')
+
+
+if __name__ == '__main__':
+  run_update()
