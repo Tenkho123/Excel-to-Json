@@ -1,0 +1,121 @@
+import os
+import re
+import openpyxl
+from openpyxl.drawing.image import Image
+from openpyxl.styles import Font
+
+# Cấu hình 3 thư mục tương ứng với 3 file Excel
+TASKS = [
+    {
+        "role": "ADMIN",
+        "excel_file": r"E:\DownloadHolder\DoAn\Updated_TestCases_ADMIN.xlsx",
+        "sheet_name": "Layout Admin",
+        "image_folder": r"E:\DownloadHolder\DoAn\Mockups_ADMIN",
+        "output_file": r"E:\DownloadHolder\DoAn\HUSC-24_ADMIN_Final_With_Layout.xlsx"
+    },
+    {
+        "role": "KHÁCH HÀNG",
+        "excel_file": r"E:\DownloadHolder\DoAn\Updated_TestCases_KhachHang.xlsx",
+        "sheet_name": "Layout Customer",
+        "image_folder": r"E:\DownloadHolder\DoAn\Mockups_KHACHHANG",
+        "output_file": r"E:\DownloadHolder\DoAn\HUSC-24_KhachHang_Final_With_Layout.xlsx"
+    },
+    {
+        "role": "NHÀ SẢN XUẤT",
+        "excel_file": r"E:\DownloadHolder\DoAn\Updated_TestCases_NHASANXUAT.xlsx",
+        "sheet_name": "Layout Nhà sản xuất",
+        "image_folder": r"E:\DownloadHolder\DoAn\Mockups_NHASANXUAT",
+        "output_file": r"E:\DownloadHolder\DoAn\HUSC-24_NHASANXUAT_Final_With_Layout.xlsx"
+    }
+]
+
+# Hàm sắp xếp tên file tự nhiên (Screen_1, Screen_2 ... Screen_10 không bị đảo lộn)
+def natural_sort_key(s):
+    return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
+
+def run_insert_by_folders():
+    title_font = Font(name='Arial', size=11, bold=True, color='1F4E79')
+    valid_exts = ('.png', '.jpg', '.jpeg', '.webp')
+
+    for task in TASKS:
+        role = task["role"]
+        excel_path = task["excel_file"]
+        folder_path = task["image_folder"]
+        sheet_name = task["sheet_name"]
+        output_path = task["output_file"]
+
+        print(f"\n==========================================")
+        print(f"▶ ĐANG XỬ LÝ: {role}")
+        print(f"  - Thư mục ảnh: {folder_path}")
+        print(f"  - File Excel: {excel_path}")
+
+        # Kiểm tra file excel
+        if not os.path.exists(excel_path):
+            print(f"⚠️ Bỏ qua: Không tìm thấy file Excel {excel_path}")
+            continue
+
+        # Kiểm tra thư mục ảnh
+        if not os.path.exists(folder_path):
+            print(f"⚠️ Bỏ qua: Chưa tạo thư mục ảnh {folder_path}")
+            continue
+
+        # Lấy tất cả file ảnh trong thư mục và sắp xếp theo thứ tự
+        image_files = sorted([f for f in os.listdir(folder_path) if f.lower().endswith(valid_exts)], key=natural_sort_key)
+
+        if not image_files:
+            print(f"⚠️ Cảnh báo: Thư mục {folder_path} đang rỗng, không có ảnh nào!")
+            continue
+
+        wb = openpyxl.load_workbook(excel_path)
+        
+        # Lấy hoặc tạo sheet Layout
+        if sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+        else:
+            ws = wb.create_sheet(title=sheet_name)
+
+        current_row = 3  # Bắt đầu chèn từ dòng 3 (cột B)
+
+        for img_name in image_files:
+            img_path = os.path.join(folder_path, img_name)
+            screen_title = os.path.splitext(img_name)[0].replace('_', ' ').strip().upper()
+
+            # 1. Ghi tiêu đề màn hình
+            ws.cell(row=current_row, column=2, value=f"📌 {screen_title}").font = title_font
+
+            # 2. Đọc ảnh và tính tỷ lệ để KHÔNG BAO GIỜ BỊ MÉO HÌNH
+            img = Image(img_path)
+            orig_w = img.width
+            orig_h = img.height
+
+            # Tự động nhận diện Dọc hay Ngang dựa trên kích thước thật của ảnh
+            if orig_h > orig_w:
+                # Ảnh dọc (Mobile): Ép chiều rộng chuẩn 360px, tự tính chiều cao tương ứng
+                target_w = 360
+                target_h = int(orig_h * (360 / orig_w))
+            else:
+                # Ảnh ngang (Desktop): Ép chiều rộng chuẩn 750px, tự tính chiều cao tương ứng
+                target_w = 750
+                target_h = int(orig_h * (750 / orig_w))
+
+            img.width = target_w
+            img.height = target_h
+
+            # 3. Chèn ảnh vào cột B
+            insert_coord = f"B{current_row + 1}"
+            ws.add_image(img, insert_coord)
+            print(f"  + Chèn: {img_name} -> {insert_coord} (Kích thước: {target_w}x{target_h}px)")
+
+            # 4. Tự động tính số dòng cách nhau để ảnh sau không đè ảnh trước
+            # Mỗi dòng trong Excel cao khoảng 20px, cộng thêm 4 dòng đệm
+            row_spacing = int(target_h / 20) + 4
+            current_row += row_spacing
+
+        # Lưu file
+        wb.save(output_path)
+        print(f"✔ Đã lưu thành công: {output_path}")
+
+    print("\n🎉 HOÀN THÀNH TẤT CẢ! Đã chèn toàn bộ ảnh từ 3 thư mục vào 3 file Excel.")
+
+if __name__ == '__main__':
+    run_insert_by_folders()
