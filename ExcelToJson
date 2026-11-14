@@ -1,0 +1,19 @@
+import json
+import pandas as pd
+
+# Added 'r' before the path to handle backslashes safely
+excel_data = pd.read_excel(
+    r'E:\DownloadHolder\DoAn\HUSC-24_BlackBoxTestCase_NHASANXUAT.xlsx',
+    sheet_name=None,
+)
+
+output = {}
+for sheet_name, df in excel_data.items():
+  # Convert each sheet dataframe to a list of records (dictionaries)
+  output[sheet_name] = json.loads(df.to_json(orient='records'))
+
+# Save the combined data to FPT_Example.json inside your DownloadHolder folder
+with open(r'E:\DownloadHolder\DoAn\HUSC-24_BlackBoxTestCase_NHASANXUAT.json', 'w', encoding='utf-8') as f:
+  json.dump(output, f, indent=2, ensure_ascii=False)
+
+print('All sheets successfully converted to FPT_Example.json')
